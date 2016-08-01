@@ -37,12 +37,6 @@ Function Install-Vagrant {
 
     )
 
-    <#
-    Some things to note....
-    'cat' is an alias for 'Get-Content', the parentheses around it ensure the file is closed prior to modifying the file to prevent i/o errors
-    The sleep loop for Cygwin is to make sure the Cygwin installer is complete prior to adding it to the system path
-    #>
-
     # install vagrant
     Write-Log("Installing vagrant via OneGet -- WMF/PowerShell 5.0 or greater required!") -Verbose
     Install-Package -ProviderName Chocolatey -Name vagrant -RequiredVersion "1.8.4" -Force -ForceBootstrap -Verbose
