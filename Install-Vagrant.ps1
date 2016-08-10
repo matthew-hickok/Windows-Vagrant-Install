@@ -10,10 +10,13 @@ Function Install-Vagrant {
     Vagrant SSH configuration files to remove incompatibilities. Installs Virtualbox 
     Guest Additions via Vagrant plugin. Installs Cygwin via BitsTransfer and adds SSH
     and Rsync components. Adds and prioritizes Cygwin's SSH and Rsync binaries in the
-    system path.
+    system path. Does not make any assumptions about chosen provider.
 
     .PARAMETER CygwinInstallPath
     The location to which Cygwin will be installed.
+
+    .PARAMETER SkipCygwinInstall
+    Skip the Cygwin install. Use this if another utility is being used for SSH and Rsync.
 
     .PARAMETER LogLocation
     The location to which the install log will be written.
@@ -33,58 +36,83 @@ Function Install-Vagrant {
         [string]$CygwinInstallPath =  "C:\cygwin",
 
         [Parameter()]
-        [string]$LogLocation = "vagrant_install.log"
+        [string]$LogLocation = "vagrant_install.log",
+
+        [Parameter()]
+        [switch]$SkipCygwinInstall
 
     )
 
+    $vagrant_version = "1.8.5"
     # install vagrant
-    Write-Log("Installing vagrant via OneGet -- WMF/PowerShell 5.0 or greater required!") -Verbose
-    Install-Package -ProviderName Chocolatey -Name vagrant -RequiredVersion "1.8.4" -Force -ForceBootstrap -Verbose
+    Write-Log("Installing vagrant $($vagrant_version) via OneGet -- WMF/PowerShell 5.0 or greater required!") -Verbose
+    Install-Package -ProviderName Chocolatey -Name vagrant -RequiredVersion $vagrant_version -Force -ForceBootstrap -Verbose
 
     # get vagrant version for later use
     Write-Log("Grabbing Vagrant version...") -Verbose
-    $vagrant_version = (gp HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* |`
-    ? {$_.DisplayName -eq 'Vagrant' }).DisplayVersion
+    $vagrant_version = (gp HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {$_.DisplayName -eq 'Vagrant' }).DisplayVersion
     Write-Log("The detected version of Vagrant is $($vagrant_version)") -Verbose
 
-    # modify vagrant helper file to remove SSH incompatibilities with Cygwin
-    $helper_path = "C:\HashiCorp\Vagrant\embedded\gems\gems\vagrant-$($vagrant_version)\plugins\synced_folders\rsync\helper.rb"
-    Write-Log("Attempting to modify Vagrant helper file at location $helper_path ") -Verbose
-    Write-Log("Helper path is valid: " + (Test-Path $helper_path)) -Verbose
-    (cat $helper_path) | ? {$_ -notmatch '"-o ControlMaster=auto " +'} | sc $helper_path
-    (cat $helper_path) | ? {$_ -notmatch '"-o ControlPath=#{controlpath} " +'} | sc $helper_path
-    (cat $helper_path) | ? {$_ -notmatch '"-o ControlPersist=10m " +'} | sc $helper_path
+    # permission change on the public key ruby file
+    $pub_file = "C:\HashiCorp\Vagrant\embedded\gems\gems\vagrant-$($vagrant_version)\plugins\guests\linux\cap\public_key.rb"
+    Write-Log("Attempting to modify Vagrant public key file at location $pub_file ") -Verbose
+    Write-Log("Path is valid: " + (Test-Path $pub_file)) -Verbose
+    $pattern = "mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys"
+    $add = "chmod 0600 ~/.ssh/authorized_keys"
+    (Get-Content $pub_file) | 
+    Foreach-Object {
+        $_
+        if ($_ -match $pattern) 
+        {
+            $add
+        }
+    } | sc $pub_file
 
-    # install virtualbox guest additions for vagrant
-    Write-Log("Installing Virtualbox guest additions") -Verbose
-    &C:\HashiCorp\Vagrant\bin\vagrant.exe plugin install vagrant-vbguest
+    #check for virtualbox install
+    $vb_installed = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.DisplayName -like "Oracle VM VirtualBox*"})
+    if ($vb_installed) {
+        #install guest additions
+        Write-Log("Virtualbox detected -- installing Virtualbox Guest Editions") -Verbose
+        &C:\HashiCorp\Vagrant\bin\vagrant.exe plugin install vagrant-vbguest
+        $hyper_v_enabled = (Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All).State
+        if ($hyper_v_enabled -eq "True") {
+            Write-Warning -Message "Hyper-V is enabled on this host -- This is known to cause serious issues with Virtualbox and can result in fatal errors on the host system"
+        }
 
-    #install cygwin
-    Start-BitsTransfer -Source https://cygwin.com/setup-x86.exe -Destination .\cygwin-setup.exe
-
-    Write-Log("Using the installer $($CygwinDownloadPath) and installing to $($CygwinInstallPath)") -Verbose
-    &.\cygwin-setup.exe -N -n -d --root $CygwinInstallPath --quiet-mode -X -A --site http://cygwin.mirror.constant.com --packages openssh,rsync
-    while($true) { 
-        if (Get-Process cygwin-setup -ErrorAction SilentlyContinue) { 
-            break; 
-        } 
-        else { 
-        Start-Sleep 5
-        } 
+    }
+    else {
+        Write-Log("Virtualbox not detected -- Skipping Virtualbox Guest Additions install") -Verbose
     }
 
-    # add cygwin to path and move to higher priority (to trump git or other ssh/rsync executables)
-    $cygwin_executables ="$($CygwinInstallPath)\bin;"
-    Write-Log ("Modifying path to add $($cygwin_executables)") -Verbose
-    $Reg = "Registry::HKLM\System\CurrentControlSet\Control\Session Manager\Environment"
-    $OldPath = (Get-ItemProperty -Path "$Reg" -Name PATH).Path
-    if ($OldPath.Contains($cygwin_executables)) {
-        Write-Log("Cygwin was already found in the path. Removing the entry to avoid duplicates.") -Verbose
-        $OldPath = $OldPath.Replace("$($cygwin_executables)","")
+    if (!$SkipCygwinInstall){
+        #install cygwin
+        Start-BitsTransfer -Source https://cygwin.com/setup-x86.exe -Destination .\cygwin-setup.exe
+
+        Write-Log("Using the installer $($CygwinDownloadPath) and installing to $($CygwinInstallPath)") -Verbose
+        &.\cygwin-setup.exe -N -n -d --root $CygwinInstallPath --quiet-mode -X -A --site http://cygwin.mirror.constant.com --packages openssh,rsync
+        while($true) { 
+            if (Get-Process cygwin-setup -ErrorAction SilentlyContinue) { 
+                break; 
+            } 
+            else { 
+            Start-Sleep 5
+            } 
+        }
+        
+        # add cygwin to path and move to higher priority (to trump git or other ssh/rsync executables)
+        $cygwin_executables ="$($CygwinInstallPath)\bin;"
+        Write-Log ("Modifying path to add $($cygwin_executables)") -Verbose
+        $Reg = "Registry::HKLM\System\CurrentControlSet\Control\Session Manager\Environment"
+        $OldPath = (Get-ItemProperty -Path "$Reg" -Name PATH).Path
+        if ($OldPath.Contains($cygwin_executables)) {
+            Write-Log("Cygwin was already found in the path. Removing the entry to avoid duplicates.") -Verbose
+            $OldPath = $OldPath.Replace("$($cygwin_executables)","")
+        }
+        $NewPath= $cygwin_executables + $OldPath
+        Write-Log (" Adding $($CygwinInstallPath)\bin to top of system path") -Verbose
+        Set-ItemProperty -Path "$Reg" -Name PATH –Value $NewPath
     }
-    $NewPath= $cygwin_executables + $OldPath
-    Write-Log (" Adding $($CygwinInstallPath)\bin to top of system path") -Verbose
-    Set-ItemProperty -Path "$Reg" -Name PATH –Value $NewPath
+
     Write-Log("======= A restart is required to finish the installation =======") -Verbose
 
 }
