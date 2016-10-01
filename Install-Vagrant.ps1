@@ -48,11 +48,6 @@ Function Install-Vagrant {
     Write-Log("Installing vagrant $($vagrant_version) via OneGet -- WMF/PowerShell 5.0 or greater required!") -Verbose
     Install-Package -ProviderName Chocolatey -Name vagrant -RequiredVersion $vagrant_version -Force -ForceBootstrap -Verbose
 
-    # get vagrant version for later use
-    Write-Log("Grabbing Vagrant version...") -Verbose
-    $vagrant_version = (gp HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {$_.DisplayName -eq 'Vagrant' }).DisplayVersion
-    Write-Log("The detected version of Vagrant is $($vagrant_version)") -Verbose
-
     #check for virtualbox install
     $vb_installed = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.DisplayName -like "Oracle VM VirtualBox*"})
     if ($vb_installed) {
