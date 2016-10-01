@@ -43,7 +43,7 @@ Function Install-Vagrant {
 
     )
 
-    $vagrant_version = "1.8.5"
+    $vagrant_version = "1.8.6"
     # install vagrant
     Write-Log("Installing vagrant $($vagrant_version) via OneGet -- WMF/PowerShell 5.0 or greater required!") -Verbose
     Install-Package -ProviderName Chocolatey -Name vagrant -RequiredVersion $vagrant_version -Force -ForceBootstrap -Verbose
@@ -52,21 +52,6 @@ Function Install-Vagrant {
     Write-Log("Grabbing Vagrant version...") -Verbose
     $vagrant_version = (gp HKLM:\Software\Wow6432Node\Microsoft\Windows\CurrentVersion\Uninstall\* | ? {$_.DisplayName -eq 'Vagrant' }).DisplayVersion
     Write-Log("The detected version of Vagrant is $($vagrant_version)") -Verbose
-
-    # permission change on the public key ruby file
-    $pub_file = "C:\HashiCorp\Vagrant\embedded\gems\gems\vagrant-$($vagrant_version)\plugins\guests\linux\cap\public_key.rb"
-    Write-Log("Attempting to modify Vagrant public key file at location $pub_file ") -Verbose
-    Write-Log("Path is valid: " + (Test-Path $pub_file)) -Verbose
-    $pattern = "mv ~/.ssh/authorized_keys.tmp ~/.ssh/authorized_keys"
-    $add = "chmod 0600 ~/.ssh/authorized_keys"
-    (Get-Content $pub_file) | 
-    Foreach-Object {
-        $_
-        if ($_ -match $pattern) 
-        {
-            $add
-        }
-    } | sc $pub_file
 
     #check for virtualbox install
     $vb_installed = (Get-ItemProperty HKLM:\Software\Microsoft\Windows\CurrentVersion\Uninstall\* |  ? {$_.DisplayName -like "Oracle VM VirtualBox*"})
